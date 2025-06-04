@@ -39,21 +39,22 @@
       </form>
       <p id="greet-msg"></p>
     </main>
-    <div
-      style="
-        display: flex;
-        gap: 10px;
-        justify-content: center;
-      "
-    >
-      <div class="canvasWrapper">
-        <canvas id="canvas-webgpu"></canvas>
+    <div class="canvasRow">
+      <div class="renderBlock">
+        <label class="canvas-label">WebGPU</label>
+        <div id="div-webgpu" class="canvasWrapper">
+          <canvas id="canvas-webgpu"></canvas>
+        </div>
       </div>
-      <div class="canvasWrapper">
-        <canvas id="canvas-wgpu1"></canvas>
+      <div class="renderBlock">
+        <label class="canvas-label">WGPU 1</label>
+        <div id="canvas-wgpu1" class="canvasWrapper">
+        </div>
       </div>
-      <div class="canvasWrapper">
-        <canvas id="canvas-wgpu2"></canvas>
+      <div class="renderBlock">
+        <label class="canvas-label">WGPU 2</label>
+        <div id="canvas-wgpu2" class="canvasWrapper">
+        </div>
       </div>
     </div>
   </body>

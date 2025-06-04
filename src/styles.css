@@ -21,18 +21,40 @@
   -webkit-text-size-adjust: 100%;
 }
 
-/* .canvasWrapper {
-  height: 50px;
-} */
+.canvasRow {
+  display: flex;
+  gap: 50px;
+  justify-content: center;
+  height: 30vh;
+  flex-grow: 1;
+}
+
+.renderBlock {
+  height: 100%;
+  width: 100%;
+}
+
+.canvasWrapper {
+  height: 100%;
+  width: 100%;
+  background-color: #3f3f3f;
+}
 
 canvas {
-  width: 200px;
-  height: 150px;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.canvas-label {
+  text-align: center;
+  display: block;
+  width: 100%;
 }
 
 .container {
   margin: 0;
-  padding-top: 10vh;
+  padding-top: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;

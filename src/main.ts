@@ -3,18 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 let greetInputEl: HTMLInputElement | null;
 let greetMsgEl: HTMLElement | null;
 
+const canvas = document.querySelector('#canvas-webgpu') as HTMLCanvasElement;
+
 async function greet() {
   if (greetMsgEl && greetInputEl) {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
     greetMsgEl.textContent = await invoke("greet", {
       name: greetInputEl.value,
     });
   }
 }
 
-// Основная функция инициализации
 async function init() {
-  // Инициализация UI элементов
   window.addEventListener("DOMContentLoaded", () => {
     greetInputEl = document.querySelector("#greet-input");
     greetMsgEl = document.querySelector("#greet-msg");
@@ -24,14 +23,11 @@ async function init() {
     });
   });
 
-  // Инициализация WebGPU
-  const canvas = document.querySelector('#canvas-webgpu') as HTMLCanvasElement;
   if (!canvas) {
     console.error("Canvas element not found!");
     return;
   }
 
-  // Проверка поддержки WebGPU
   if (!navigator.gpu) {
     console.error("WebGPU not supported!");
     return;
@@ -50,7 +46,6 @@ async function init() {
     const context = canvas.getContext('webgpu') as GPUCanvasContext;
     const devicePixelRatio = window.devicePixelRatio || 1;
     
-    // Установка размеров canvas
     canvas.width = canvas.clientWidth * devicePixelRatio;
     canvas.height = canvas.clientHeight * devicePixelRatio;
     
@@ -62,33 +57,35 @@ async function init() {
       alphaMode: "premultiplied"
     });
 
-  const pipeline = device.createRenderPipeline({
-    layout: 'auto',
-    vertex: {
-      module: device.createShaderModule({
+  const shaderModule = device.createShaderModule({
         code: `
           @vertex
-          fn main(
+          fn vs(
             @builtin(vertex_index) VertexIndex : u32
           ) -> @builtin(position) vec4f {
             var pos = array<vec2f, 3>(
-              vec2(0.0, 0.5),
-              vec2(-0.5, -0.5),
-              vec2(0.5, -0.5)
+              vec2(0.0, 1.0),
+              vec2(-1.0, -1.0),
+              vec2(1.0, -1.0)
             );
 
             return vec4f(pos[VertexIndex], 0.0, 1.0);
-          }`,
-      }),
+          }
+            
+          @fragment
+          fn fs() -> @location(0) vec4f {
+            return vec4(1.0, 0.0, 0.0, 1.0);
+          }
+          `,
+      });
+
+  const pipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module: shaderModule
     },
     fragment: {
-      module: device.createShaderModule({
-        code: `
-          @fragment
-          fn main() -> @location(0) vec4f {
-            return vec4(1.0, 0.0, 0.0, 1.0);
-          }`,
-      }),
+      module: shaderModule,
       targets: [
         {
           format: presentationFormat,
@@ -100,7 +97,6 @@ async function init() {
     },
   });
 
-  // Функция рендеринга кадра
   function render() {
     if (!device) return;
 
@@ -124,7 +120,6 @@ async function init() {
     requestAnimationFrame(render);
   }
 
-  // Запуск цикла рендеринга
   requestAnimationFrame(render);
 
   } catch(error) {
@@ -133,5 +128,76 @@ async function init() {
 
 }
 
-// Запуск приложения
 init();
+
+
+const divWebgpu = document.getElementById("div-webgpu");
+
+const observer = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    const contentBoxSize = Array.isArray(entry.contentBoxSize)
+      ? entry.contentBoxSize[0]
+      : entry.contentBoxSize;
+
+    const width = contentBoxSize.inlineSize;
+    const height = contentBoxSize.blockSize;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+  }
+});
+
+observer.observe(divWebgpu!);
+
+
+
+
+const wgpu1Div = document.getElementById("canvas-wgpu1")!;
+const rect = wgpu1Div.getBoundingClientRect();
+const divBackgroundColor = window.getComputedStyle(wgpu1Div).backgroundColor;
+const [r, g, b] = divBackgroundColor.match(/\d+/g)?.map(Number) ?? [0, 0, 0];
+
+console.log(window.getComputedStyle(wgpu1Div).backgroundColor);
+
+
+await invoke("command_create_overlay_window", {
+  label: "wgpu1",
+  x: rect.left,
+  y: rect.top,
+  width: rect.width,
+  height: rect.height,
+  r, g, b
+});
+
+// import { getCurrentWindow } from "@tauri-apps/api/window";
+
+// const overlayLabel = "wgpu1";
+// const targetElement = document.getElementById("div-webgpu1");
+
+// function updateOverlayBounds() {
+//   if (!targetElement) return;
+
+//   const rect = targetElement.getBoundingClientRect();
+//   const bg = getComputedStyle(targetElement).backgroundColor;
+//   const [r, g, b] = bg.match(/\d+/g)?.map(Number) ?? [0, 0, 0];
+
+//   getCurrentWindow().innerPosition().then((mainPos) => {
+//     invoke("command_create_overlay_window", {
+//       label: overlayLabel,
+//       x: rect.x,
+//       y: rect.y,
+//       width: rect.width,
+//       height: rect.height,
+//       r,
+//       g,
+//       b,
+//     });
+//   });
+// }
+
+
+// const resizeObserver = new ResizeObserver(updateOverlayBounds);
+// if (targetElement) resizeObserver.observe(targetElement);
+
+// getCurrentWindow().onMoved(updateOverlayBounds);
