@@ -1,3 +1,6 @@
+use std::{collections::HashMap, sync::Mutex};
+
+use serde_json::Map;
 use tauri::Manager;
 use wgpu::PipelineCompilationOptions;
 
@@ -7,7 +10,7 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-fn srgb_to_linear(c: i32) -> f64 {
+fn srgb_to_linear(c: u8) -> f64 {
     let c = c as f64 / 255.0;
     if c <= 0.04045 {
         c / 12.92
@@ -16,25 +19,48 @@ fn srgb_to_linear(c: i32) -> f64 {
     }
 }
 
-fn create_overlay_window(
-    app: tauri::AppHandle,
-    label: String,
+#[derive(serde::Deserialize)]
+struct Color {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+#[derive(serde::Deserialize)]
+struct Position {
     x: f64,
     y: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct Size {
     width: f64,
     height: f64,
-    r: i32,
-    g: i32,
-    b: i32,
+}
+
+struct OverlayWindowConfig {
+    position: Position,
+}
+
+struct AppState {
+    render_windows: Mutex<HashMap<String, OverlayWindowConfig>>,
+}
+
+fn create_render_window(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    label: String,
+    position: Position,
+    size: Size,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let main_window = app.get_window("main").expect("Main window should exist");
     let main_position = main_window.inner_position()?;
 
-    let x = x + main_position.x as f64;
-    let y = y + main_position.y as f64;
+    let x = position.x + main_position.x as f64;
+    let y = position.y + main_position.y as f64;
 
-    let window = tauri::window::WindowBuilder::new(&app, label)
-        .inner_size(width, height)
+    let _window = tauri::window::WindowBuilder::new(&app, &label)
+        .inner_size(size.width, size.height)
         .position(x, y)
         .decorations(false)
         .transparent(false)
@@ -46,9 +72,35 @@ fn create_overlay_window(
 
     main_window.set_focus()?;
 
-    let size = window.inner_size()?;
+    let mut render_windows = state.render_windows.lock().unwrap();
+    let window_config = OverlayWindowConfig { position };
+    render_windows.insert(label, window_config);
+
+    Ok(())
+}
+
+#[tauri::command]
+fn c_create_render_window(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    label: String,
+    position: Position,
+    size: Size,
+) -> Result<(), String> {
+    create_render_window(app, state, label, position, size).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn render_triangle(
+    app: tauri::AppHandle,
+    label: String,
+    color: Color,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let render_window = app.get_window(&label).expect("Render window should exist!");
+    let size = render_window.inner_size()?;
     let instance = wgpu::Instance::default();
-    let surface = instance.create_surface(window)?;
+    let surface = instance.create_surface(render_window)?;
 
     let adapter =
         tauri::async_runtime::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -157,9 +209,9 @@ fn create_overlay_window(
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: srgb_to_linear(r),
-                        g: srgb_to_linear(g),
-                        b: srgb_to_linear(b),
+                        r: srgb_to_linear(color.r),
+                        g: srgb_to_linear(color.g),
+                        b: srgb_to_linear(color.b),
                         a: (1.0),
                     }),
                     store: wgpu::StoreOp::Store,
@@ -179,56 +231,83 @@ fn create_overlay_window(
     Ok(())
 }
 
-fn update_or_create_overlay_window(
-    app: tauri::AppHandle,
-    label: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    r: i32,
-    g: i32,
-    b: i32,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(window) = app.get_window(&label) {
-        window.set_position(tauri::Position::Physical((x as i32, y as i32).into()))?;
-        window.set_size(tauri::Size::Physical((width as u32, height as u32).into()))?;
-        // Надо тут надо дернуть рендер функцию
-        // return Ok(());
-    }
-
-    create_overlay_window(app, label, x, y, width, height, r, g, b)
-}
-
 #[tauri::command]
-fn command_create_overlay_window(
-    app: tauri::AppHandle,
-    label: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    r: i32,
-    g: i32,
-    b: i32,
-) -> Result<(), String> {
-    update_or_create_overlay_window(app, label, x, y, width, height, r, g, b).map_err(|e| e.to_string())?;
+fn c_render_triangle(app: tauri::AppHandle, label: String, color: Color) -> Result<(), String> {
+    render_triangle(app, label, color).map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
+// fn update_or_create_overlay_window(
+//     app: tauri::AppHandle,
+//     label: String,
+//     position: Position,
+//     size: Size,
+//     color: Color,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     if let Some(window) = app.get_window(&label) {
+//         window.set_position(tauri::Position::Physical((position.x as i32, position.y as i32).into()))?;
+//         window.set_size(tauri::Size::Physical((size.width as u32, size.height as u32).into()))?;
+//         // Надо тут надо дернуть рендер функцию
+//         // return Ok(());
+//     }
+
+//     create_overlay_window(app, label, position, size, color)
+// }
+
+// #[tauri::command]
+// fn command_create_overlay_window(
+//     app: tauri::AppHandle,
+//     label: String,
+//     position: Position,
+//     size: Size,
+//     color: Color,
+// ) -> Result<(), String> {
+//     update_or_create_overlay_window(app, label, position, size, color)
+//         .map_err(|e| e.to_string())?;
+
+//     Ok(())
+// }
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // .manage(state)
-        // .setup(|app| {
-        //     let main_window = app.get_window("main")?;
-            
-        // })
+        .manage(AppState {
+            render_windows: Mutex::new(HashMap::new()),
+        })
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            let main_window = app.get_window("main").unwrap();
+
+            main_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Moved(_) = event {
+                    let main_window = app_handle.get_window("main").unwrap();
+                    let state = app_handle.state::<AppState>();
+                    let render_windows = state.render_windows.lock().unwrap();
+
+                    let inner = main_window.inner_position().unwrap();
+
+                    for (label, config) in render_windows.iter() {
+                        if let Some(window) = app_handle.get_window(label) {
+                            let new_pos = tauri::PhysicalPosition {
+                                x: (inner.x as f64 + config.position.x),
+                                y: (inner.y as f64 + config.position.y),
+                            };
+
+                            let _ = window.set_position(new_pos);
+                        }
+                    }
+                }
+            });
+
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             greet,
-            command_create_overlay_window
+            // command_create_overlay_window,
+            c_create_render_window,
+            c_render_triangle
         ])
         // .on_window_event(handler)
         .run(tauri::generate_context!())
