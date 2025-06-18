@@ -21,6 +21,10 @@
   -webkit-text-size-adjust: 100%;
 }
 
+#wgpu1 {
+  position: relative;
+}
+
 .canvasRow {
   display: flex;
   gap: 50px;

@@ -59,47 +59,84 @@ await invoke("c_render_triangle", {
   color: { r, g, b }
 });
 
-type ResizeStartCallback = () => void;
-type ResizeEndCallback = () => void;
-
 class ResizeObserverWithStartEnd {
   private observer: ResizeObserver;
   private resizeTimer: number | null = null;
   private isResizing: boolean = false;
   private readonly delay: number;
+  private loaderElement: HTMLElement | null = null;
 
   constructor(
-    onResizeStart: ResizeStartCallback,
-    onResizeEnd: ResizeEndCallback,
     delay: number = 200
   ) {
     this.delay = delay;
 
-    this.observer = new ResizeObserver((entries) => {
+    // Создаем элемент лоадера
+    this.loaderElement = document.createElement('div');
+    this.loaderElement.style.position = 'absolute';
+    this.loaderElement.style.top = '0';
+    this.loaderElement.style.left = '0';
+    this.loaderElement.style.width = '100%';
+    this.loaderElement.style.height = '100%';
+    this.loaderElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    this.loaderElement.style.display = 'none';
+    this.loaderElement.style.justifyContent = 'center';
+    this.loaderElement.style.alignItems = 'center';
+    this.loaderElement.style.zIndex = '1000';
+this.loaderElement.innerHTML = `
+  <div class="spinner"></div>
+  <style>
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top: 4px solid #fff;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+`;
+
+    this.observer = new ResizeObserver(async (entries) => {
       if (!this.isResizing) {
         this.isResizing = true;
-        onResizeStart();
+          await invoke("c_hide_window", {
+            label: "wgpu1",
+          });
+        for (const entry of entries) {
+          // add loader
+          entry.target.appendChild(this.loaderElement!);
+          this.loaderElement!.style.display = 'flex';
+        }
       }
 
       if (this.resizeTimer) {
         clearTimeout(this.resizeTimer);
       }
 
-      this.resizeTimer = window.setTimeout(() => {
+      this.resizeTimer = window.setTimeout(async () => {
         this.isResizing = false;
 
         for (const entry of entries) {
           const rect = entry.target.getBoundingClientRect();
 
-          invoke("c_update_overlay_window", {
+          await invoke("c_update_overlay_window", {
             label: "wgpu1",
             position: { x: rect.x, y: rect.y },
             size: { width: rect.width, height: rect.height },
             color: { r, g, b }
           });
+
+          // hide loader
+          if (this.loaderElement) {
+            this.loaderElement.style.display = 'none';
+          }
         }
 
-        onResizeEnd();
       }, this.delay);
     });
   }
@@ -110,20 +147,23 @@ class ResizeObserverWithStartEnd {
 
   unobserve(target: Element): void {
     this.observer.unobserve(target);
+    if (this.loaderElement && target.contains(this.loaderElement)) {
+      target.removeChild(this.loaderElement);
+    }
   }
 
   disconnect(): void {
     if (this.resizeTimer) {
       clearTimeout(this.resizeTimer);
     }
+    if (this.loaderElement && this.loaderElement.parentElement) {
+      this.loaderElement.parentElement.removeChild(this.loaderElement);
+    }
     this.observer.disconnect();
   }
 }
 
-const resizeTracker = new ResizeObserverWithStartEnd(
-  () => console.log("Resize started!"),
-  () => console.log("Resize ended!")
-);
+const resizeTracker = new ResizeObserverWithStartEnd();
 
 if (wgpu1Div) {
   resizeTracker.observe(wgpu1Div);

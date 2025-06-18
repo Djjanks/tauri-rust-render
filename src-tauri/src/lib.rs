@@ -289,7 +289,22 @@ fn c_update_overlay_window(
     size: Size,
     color: Color,
 ) -> Result<(), String> {
+    if let Some(window) = app.get_window(&label) {
+        let _ = window.show();
+    }
     update_overlay_window(app, state, label, position, size, color).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn c_hide_window(
+    app: tauri::AppHandle,
+    label: String,
+) -> Result<(), String> {
+    if let Some(window) = app.get_window(&label) {
+        let _ = window.hide();
+    }
 
     Ok(())
 }
@@ -328,7 +343,8 @@ pub fn run() {
             greet,
             c_create_render_window,
             c_render_triangle,
-            c_update_overlay_window
+            c_update_overlay_window,
+            c_hide_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
