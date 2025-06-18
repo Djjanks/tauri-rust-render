@@ -3,54 +3,39 @@ use std::{collections::HashMap, sync::Mutex};
 use tauri::Manager;
 use wgpu::PipelineCompilationOptions;
 
+mod renderer;
+
+use renderer::*;
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-fn srgb_to_linear(c: u8) -> f64 {
-    let c = c as f64 / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-}
-
-#[derive(serde::Deserialize, Clone)]
-struct Position {
-    x: f64,
-    y: f64,
-}
-
-#[derive(serde::Deserialize)]
-struct Size {
-    width: f64,
-    height: f64,
-}
-
-struct OverlayWindowConfig {
-    position: Position,
+struct RenderState {
+    // surface: wgpu::Surface<'static>,
+    instance: wgpu::Instance,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: Mutex<wgpu::SurfaceConfiguration>,
+    pipeline: wgpu::RenderPipeline,
 }
 
 struct AppState {
     render_windows: Mutex<HashMap<String, OverlayWindowConfig>>,
 }
 
-struct WgpuState {
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: Mutex<wgpu::SurfaceConfiguration>,
-    pipeline: wgpu::RenderPipeline,
+pub fn recalc_surface(window: &tauri::Window) -> Result<(), Box<dyn std::error::Error>> {
+    let size = window.inner_size()?;
+    let wgpu = window.state::<RenderState>();
+    let mut config = wgpu.config.lock().unwrap();
+
+    config.width = size.width;
+    config.height = size.height;
+    let surface = wgpu.instance.create_surface(window).unwrap();
+    surface.configure(&wgpu.device, &config);
+    Ok(())
 }
 
 fn create_render_window(
@@ -99,16 +84,14 @@ fn c_create_render_window(
     Ok(())
 }
 
-fn initialize_renderer(
-    window: &tauri::Window,
-) -> Result<(), Box<dyn std::error::Error + '_>> {
+fn initialize_renderer(window: &tauri::Window) -> Result<(), Box<dyn std::error::Error + '_>> {
     let size = window.inner_size()?;
     let instance = wgpu::Instance::default();
     let surface = instance.create_surface(window)?;
 
     // Преобразуем поверхность в 'static с помощью unsafe
-    let surface =
-        unsafe { std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(surface) };
+    // let surface =
+    //     unsafe { std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(surface) };
 
     let adapter =
         tauri::async_runtime::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -202,8 +185,9 @@ fn initialize_renderer(
 
     let config = Mutex::new(config);
 
-    window.manage(WgpuState {
-        surface,
+    window.manage(RenderState {
+        // surface,
+        instance,
         device,
         queue,
         config,
@@ -213,22 +197,13 @@ fn initialize_renderer(
     Ok(())
 }
 
-fn recalc_surface(window: &tauri::Window) -> Result<(), Box<dyn std::error::Error>> {
-    let size = window.inner_size()?;
-    let wgpu_state = window.state::<WgpuState>();
-    let mut config = wgpu_state.config.lock().unwrap();
-
-    config.width = size.width;
-    config.height = size.height;
-
-    wgpu_state.surface.configure(&wgpu_state.device, &config);
-    Ok(())
-}
-
 fn render_frame(window: &tauri::Window, color: Color) {
-    let wgpu = window.state::<WgpuState>();
-    let frame = wgpu
-        .surface
+    let wgpu = window.state::<RenderState>();
+    let config = wgpu.config.lock().unwrap();
+    let surface = wgpu.instance.create_surface(window).unwrap();
+    surface.configure(&wgpu.device, &config);
+
+    let frame: wgpu::SurfaceTexture = surface
         .get_current_texture()
         .expect("Failed to acquire next swap chain texture");
     let view = frame
@@ -267,7 +242,6 @@ fn render_frame(window: &tauri::Window, color: Color) {
 
 #[tauri::command]
 fn c_render_triangle(app: tauri::AppHandle, label: String, color: Color) -> Result<(), String> {
-    // render_triangle(app, label, color).map_err(|e| e.to_string())?;
     let render_window = app.get_window(&label).unwrap();
     initialize_renderer(&render_window).map_err(|e| e.to_string())?;
 
@@ -294,15 +268,12 @@ fn update_overlay_window(
 
         let inner = main_window.inner_position().unwrap();
 
-        window.set_position(tauri::PhysicalPosition {
-                x: (inner.x as f64 + position.x),
-                y: (inner.y as f64 + position.y),
-            })?;
+        window.set_position(calculate_overlay_position(inner, &position))?;
         window.set_size(tauri::Size::Physical(
             (size.width as u32, size.height as u32).into(),
         ))?;
 
-        // recalc_surface(&window);
+        let _ = recalc_surface(&window);
 
         render_frame(&window, color);
     }
@@ -328,7 +299,6 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             render_windows: Mutex::new(HashMap::new()),
-            // wgpu: Mutex::new(HashMap::new()),
         })
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -344,12 +314,8 @@ pub fn run() {
 
                     for (label, config) in render_windows.iter() {
                         if let Some(window) = app_handle.get_window(label) {
-                            let new_pos = tauri::PhysicalPosition {
-                                x: (inner.x as f64 + config.position.x),
-                                y: (inner.y as f64 + config.position.y),
-                            };
-
-                            let _ = window.set_position(new_pos);
+                            let _ = window
+                                .set_position(calculate_overlay_position(inner, &config.position));
                         }
                     }
                 }
@@ -364,7 +330,6 @@ pub fn run() {
             c_render_triangle,
             c_update_overlay_window
         ])
-        // .on_window_event(handler)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

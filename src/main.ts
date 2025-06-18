@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { initWebGpu } from "./webgpu";
-import { throttle } from "lodash";
 
 let greetInputEl: HTMLInputElement | null;
 let greetMsgEl: HTMLElement | null;
@@ -23,7 +22,7 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 const divWebgpu = document.getElementById("div-webgpu");
-const canvas = document.querySelector("#canvas-webgpu") as HTMLCanvasElement;
+const canvas = document.querySelector("#webgpu") as HTMLCanvasElement;
 
 initWebGpu(canvas);
 
@@ -44,17 +43,10 @@ const resizeWebGpuObserver = new ResizeObserver((entries) => {
 
 resizeWebGpuObserver.observe(divWebgpu!);
 
-const wgpu1Div = document.getElementById("canvas-wgpu1")!;
+const wgpu1Div = document.getElementById("wgpu1")!;
 const rect = wgpu1Div.getBoundingClientRect();
 const divBackgroundColor = window.getComputedStyle(wgpu1Div).backgroundColor;
 const [r, g, b] = divBackgroundColor.match(/\d+/g)?.map(Number) ?? [0, 0, 0];
-
-// await invoke("command_create_overlay_window", {
-//   label: "wgpu1",
-//   position: {x: rect.left, y: rect.top},
-//   size: {width: rect.width, height: rect.height},
-//   color: {r, g, b}
-// });
 
 await invoke("c_create_render_window", {
   label: "wgpu1",
@@ -67,42 +59,72 @@ await invoke("c_render_triangle", {
   color: { r, g, b }
 });
 
-// const sendDivSize = throttle(async (label, position, size, color) => {
-//   await invoke("c_update_overlay_window", {
-//     label,
-//     position,
-//     size,
-//     color
-//   });
-// }, 100); // Задержка 100 мс
+type ResizeStartCallback = () => void;
+type ResizeEndCallback = () => void;
 
-const resizeWgpuObserver = new ResizeObserver((entries) => {
-  
-  
-  for (const entry of entries) {
-    const rect = entry.target.getBoundingClientRect();
-        const contentBoxSize = Array.isArray(entry.contentBoxSize)
-      ? entry.contentBoxSize[0]
-      : entry.contentBoxSize;
-    console.log({rect, contentBoxSize});
-    
+class ResizeObserverWithStartEnd {
+  private observer: ResizeObserver;
+  private resizeTimer: number | null = null;
+  private isResizing: boolean = false;
+  private readonly delay: number;
 
-    invoke("c_update_overlay_window", {
-      label: "wgpu1",
-      position: { x: rect.x, y: rect.y },
-      size: { width: rect.width, height: rect.height },
-      color: { r, g, b }
-  });
+  constructor(
+    onResizeStart: ResizeStartCallback,
+    onResizeEnd: ResizeEndCallback,
+    delay: number = 200
+  ) {
+    this.delay = delay;
 
-    // sendDivSize(
-    //   "wgpu1",
-    //   { x: rect.left, y: rect.top },
-    //   { width: rect.width, height: rect.height },
-    //   { r, g, b }
-    // );
+    this.observer = new ResizeObserver((entries) => {
+      if (!this.isResizing) {
+        this.isResizing = true;
+        onResizeStart();
+      }
+
+      if (this.resizeTimer) {
+        clearTimeout(this.resizeTimer);
+      }
+
+      this.resizeTimer = window.setTimeout(() => {
+        this.isResizing = false;
+
+        for (const entry of entries) {
+          const rect = entry.target.getBoundingClientRect();
+
+          invoke("c_update_overlay_window", {
+            label: "wgpu1",
+            position: { x: rect.x, y: rect.y },
+            size: { width: rect.width, height: rect.height },
+            color: { r, g, b }
+          });
+        }
+
+        onResizeEnd();
+      }, this.delay);
+    });
   }
-});
 
-resizeWgpuObserver.observe(wgpu1Div);
+  observe(target: Element): void {
+    this.observer.observe(target);
+  }
 
+  unobserve(target: Element): void {
+    this.observer.unobserve(target);
+  }
 
+  disconnect(): void {
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+    }
+    this.observer.disconnect();
+  }
+}
+
+const resizeTracker = new ResizeObserverWithStartEnd(
+  () => console.log("Resize started!"),
+  () => console.log("Resize ended!")
+);
+
+if (wgpu1Div) {
+  resizeTracker.observe(wgpu1Div);
+}
